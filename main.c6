@@ -1,0 +1,121 @@
+/*
+ * Task 7: Software PWM via Timer Interrupts
+ * Target: STM32F051C8 (UCT Dev Board)
+ * Output: PB5 (Byte of LEDs bit D5)
+ * Signal: 100 Hz, 30% duty cycle, generated entirely in software
+ */
+#include "main.h"
+#include "stm32f0xx.h"
+#include <stdint.h>
+
+#define TIM16_PSC_VALUE   7
+#define TIM16_ARR_VALUE   99
+
+TIM_HandleTypeDef htim16;
+
+static void SystemClock_Config(void);
+static void GPIO_Init(void);
+static void TIM16_Init(void);
+
+int main(void)
+{
+    /* TODO: Initialize GPIO and TIM16 peripherals */
+	SystemClock_Config();
+	GPIO_Init();
+	TIM16_Init();
+
+    while (1)
+    {
+        /* All PWM generation happens in the ISR; main loop remains free */
+    	 //HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+    }
+}
+
+void SystemClock_Config(void)
+{
+
+  LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
+  while(LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0) {}
+
+  LL_RCC_HSI_Enable();
+  while(LL_RCC_HSI_IsReady() != 1) {}
+
+  LL_RCC_HSI_SetCalibTrimming(16);
+  LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+  LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+  LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
+  while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI) {}
+
+  LL_SetSystemCoreClock(8000000);
+  if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK) {
+    Error_Handler();
+  }
+}
+
+
+static void GPIO_Init(void)
+{
+/*Insert PB0 initialization code*/
+  __HAL_RCC_GPIOB_CLK_ENABLE();  // enable GPIOB clock first!
+
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = GPIO_PIN_4;  // match your actual LED pin
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+}
+
+
+static void TIM16_Init(void)
+{
+    __HAL_RCC_TIM16_CLK_ENABLE();
+
+    htim16.Instance = TIM16;
+    htim16.Init.Prescaler = TIM16_PSC_VALUE;
+    htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim16.Init.Period = TIM16_ARR_VALUE;
+    htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    htim16.Init.RepetitionCounter = 0;
+    htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+    if (HAL_TIM_Base_Init(&htim16) != HAL_OK) {
+        Error_Handler();
+    }
+
+    HAL_NVIC_SetPriority(TIM16_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(TIM16_IRQn);
+
+    HAL_TIM_Base_Start_IT(&htim16);
+}
+
+void TIM16_IRQHandler(void)
+{
+    static uint8_t counter = 0;
+
+    /* TODO: Check if the update interrupt flag (UIF) is set */
+    if(TIM16 -> SR & TIM_SR_UIF) {
+    	__HAL_TIM_CLEAR_FLAG(&htim16,TIM_FLAG_UPDATE);
+    	counter++;
+		if(counter < 30) {
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+		}
+		else if(counter <= 99) {
+			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+		}
+		else {
+			counter=0;
+		}
+    }
+
+}
+
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  __disable_irq();
+  while (1)
+  {
+  }
+  /* USER CODE END Error_Handler_Debug */
+}
+
