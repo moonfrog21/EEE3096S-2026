@@ -290,7 +290,7 @@ void mode3_update(void)
         case SPARKLE_TURN_OFF:
             /*  Wait for the random turn-off delay (100ms to 150ms) to elapse */
         	while(HAL_GetTick() - now < sparkle_next_off_time) {}
-        	sparkle_next_off_time = 100 + (rand() >> 21);
+        	sparkle_next_off_time = 100 + (rand() >> 24);
 
             /*  Turn off one LED from the sparkle_leds_on array */
         	if (sparkle_num_leds_on != 0) {
