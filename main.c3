@@ -18,18 +18,19 @@ TIM_HandleTypeDef htim16;
 
 /* USER CODE BEGIN PV */
 volatile uint8_t timer_event = 0;
-volatile uint8_t current_led = 0;
-volatile int8_t direction = 1;
+volatile uint8_t current_led = 7;
+volatile int8_t direction = -1;
 
 // LED arrays
 GPIO_TypeDef* led_ports[8] = {GPIOB, GPIOB, GPIOB, GPIOB,
-							  GPIOB, GPIOB, GPIOB, GPIOB};
+GPIOB, GPIOB, GPIOB, GPIOB};
 uint16_t led_pins[8] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3,
-						GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7};
+GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7};
 
-#define DEBOUNCE_MS 10
-uint32_t last_update = 0;
-uint8_t status = 2; //0 = falling edge, 1 = rising edge, 2 = updated
+// TODO: Define your debounce delay based on your oscilloscope measurement
+// #define DEBOUNCE_MS ???
+uint32_t last_button_press_time = 0;
+#define DEBOUNCE_MS 50
 
 // Speed state: 0 = slow (1s), 1 = fast (0.5s)
 uint8_t speed_state = 0;
@@ -51,61 +52,69 @@ void change_timer_period(uint32_t new_period_ms);
 /* USER CODE BEGIN 0 */
 void turn_off_all_leds(void)
 {
-	for(int i = 0; i<8; i++) {
-		HAL_GPIO_WritePin(led_ports[i],led_pins[i],GPIO_PIN_RESET);
-	}
-
+// TODO: Iterate through the LED array. Set all pins to GPIO_PIN_RESET.
+	for(uint8_t i =0; i < 8; i++) {
+			HAL_GPIO_WritePin(led_ports[i], led_pins[i], GPIO_PIN_RESET);
+		}
 }
 
 void update_led_pattern(void)
 {
+    /* TODO: Implement the running light pattern logic */
+    // 1. Turn off all LEDs
 	turn_off_all_leds();
-	HAL_GPIO_WritePin(led_ports[current_led],led_pins[current_led],GPIO_PIN_SET);
-	if(current_led == 0 && direction == -1) {
+
+    // 2. Turn on the current LED
+	// using the WritePIN, which takes the port, Pin name and command
+	HAL_GPIO_WritePin(led_ports[current_led], led_pins[current_led], GPIO_PIN_SET);
+
+	// 3. Update the current_led index based on direction
+	current_led += direction;
+
+    // 4. Handle direction reversal at the edges (without duplicating states)
+	if (current_led == 7) {
+		direction = -1;
+	} else if (current_led == 0) {
 		direction = 1;
 	}
-	if(current_led == 7 && direction == 1) {
-		direction = -1;
-	}
-	current_led+=direction;
-
 }
 
 void change_timer_period(uint32_t new_period_ms)
 {
 // TODO: Calculate the new ARR value using your formula.
 // Note: Timer clock is 1000 Hz (Prescaler is 7999).
-	uint32_t new_arr = new_period_ms - 1; // Replace 0 with your calculation.
+uint32_t new_arr = new_period_ms - 1; // Replace 0 with your calculation.
 
 // TODO: Update the TIM16 ARR register directly.
-	TIM16->ARR = new_period_ms;
-
+	TIM16->ARR = new_arr;
 // TODO: Reset the TIM16 CNT register to 0.
-	TIM16->CNT = 0;
-
+	TIM16->CNT =0;
 // Store the new ARR value for reference
 current_arr = new_arr;
 }
 
-
 void handle_button_press(void)
 {
-	uint32_t current_tick = HAL_GetTick();
-	uint8_t up_or_down = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_0); //0 = down, 1 = up
+// TODO: Get the current system tick using HAL_GetTick().
+	uint32_t current_time = HAL_GetTick();
+// TODO: Check the time elapsed since the last valid press.
+// Compare the elapsed time against DEBOUNCE_MS.
+	if ((current_time - last_button_press_time) > DEBOUNCE_MS) {
 
-	//if its up and rising edge status,
-	if(up_or_down == 1 && status == 1) {
-		speed_state ^= 1;
-		change_timer_period(30 + speed_state*970);
-		status = 2; //updated status
-	}
-	else if(up_or_down == 0 && status == 2 && current_tick - last_update > DEBOUNCE_MS) {
-		last_update = current_tick;
-		status = 0; //falling edge
-	}
-	else if(up_or_down == 1 && status == 0 && current_tick - last_update > DEBOUNCE_MS) {
-		last_update = current_tick;
-		status = 1; //rising edge
+// TODO: Read the PA0 button state. The button is active low.
+		if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_RESET) {
+// TODO: If a valid debounced press occurs:
+// 1. Update last_button_press_time.
+			last_button_press_time = current_time;
+// 2. Toggle speed_state between 0 and 1.
+			speed_state = !speed_state; // change to opposite
+// 3. Call change_timer_period() with 500 or 1000.
+			if (speed_state == 1) {
+				change_timer_period(500);
+			} else {
+				change_timer_period(1000);
+			}
+		}
 	}
 }
 /* USER CODE END 0 */
@@ -118,33 +127,33 @@ void handle_button_press(void)
 */
 int main(void)
 {
-	HAL_Init();
-	SystemClock_Config();
+HAL_Init();
+SystemClock_Config();
 
-	MX_GPIO_Init();
-	MX_TIM16_Init();
+MX_GPIO_Init();
+MX_TIM16_Init();
 
-	/* USER CODE BEGIN 2 */
-	turn_off_all_leds();
+/* USER CODE BEGIN 2 */
+turn_off_all_leds();
 
-	// Start timer at 1-second period
-	change_timer_period(1000);
-	HAL_TIM_Base_Start_IT(&htim16);
-	/* USER CODE END 2 */
+// Start timer at 1-second period
+change_timer_period(1000);
+HAL_TIM_Base_Start_IT(&htim16);
+/* USER CODE END 2 */
 
-	while (1)
-	{
-		/* USER CODE BEGIN WHILE */
-		// Handle button press (debounced)
-		handle_button_press();
+while (1)
+{
+/* USER CODE BEGIN WHILE */
+// Handle button press (debounced)
+handle_button_press();
 
-		// Handle timer event
-		if (timer_event) {
-		  timer_event = 0;
-		  update_led_pattern();
-		}
-		/* USER CODE END WHILE */
-	}
+// Handle timer event
+if (timer_event) {
+  timer_event = 0;
+  update_led_pattern();
+}
+/* USER CODE END WHILE */
+}
 }
 
 /*
@@ -153,25 +162,23 @@ int main(void)
 */
 void SystemClock_Config(void)
 {
-    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
-    while(LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0) {}
+LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
+while(LL_FLASH_GetLatency() != LL_FLASH_LATENCY_0) {}
 
-    LL_RCC_HSI_Enable();
-    while(LL_RCC_HSI_IsReady() != 1) {}
+LL_RCC_HSI_Enable();
+while(LL_RCC_HSI_IsReady() != 1) {}
 
-    LL_RCC_HSI_SetCalibTrimming(16);
-    LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
-    LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
-    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
-    while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI) {}
+LL_RCC_HSI_SetCalibTrimming(16);
+LL_RCC_SetAHBPrescaler(LL_RCC_SYSCLK_DIV_1);
+LL_RCC_SetAPB1Prescaler(LL_RCC_APB1_DIV_1);
+LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
+while(LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI) {}
 
-    LL_SetSystemCoreClock(8000000);
-
-    if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK) {
-        Error_Handler();
-    }
+LL_SetSystemCoreClock(8000000);
+if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK) {
+Error_Handler();
 }
-
+}
 
 /*
 
@@ -179,19 +186,17 @@ void SystemClock_Config(void)
 */
 static void MX_TIM16_Init(void)
 {
-	htim16.Instance = TIM16;
-	htim16.Init.Prescaler = 7999;
-	htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim16.Init.Period = 999;
-	htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-	htim16.Init.RepetitionCounter = 0;
-	htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-
-	if (HAL_TIM_Base_Init(&htim16) != HAL_OK) {
-		Error_Handler();
-	}
-
-	NVIC_EnableIRQ(TIM16_IRQn);
+htim16.Instance = TIM16;
+htim16.Init.Prescaler = 7999;
+htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
+htim16.Init.Period = 999;
+htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+htim16.Init.RepetitionCounter = 0;
+htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+if (HAL_TIM_Base_Init(&htim16) != HAL_OK) {
+Error_Handler();
+}
+NVIC_EnableIRQ(TIM16_IRQn);
 }
 
 /*
@@ -200,26 +205,26 @@ static void MX_TIM16_Init(void)
 */
 static void MX_GPIO_Init(void)
 {
-	__HAL_RCC_GPIOA_CLK_ENABLE();
-	__HAL_RCC_GPIOB_CLK_ENABLE();
+__HAL_RCC_GPIOA_CLK_ENABLE();
+__HAL_RCC_GPIOB_CLK_ENABLE();
 
-	GPIO_InitTypeDef GPIO_InitStruct = {0};
+GPIO_InitTypeDef GPIO_InitStruct = {0};
 
-	// Configure LEDs (PB0..PB7) as outputs
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+// Configure LEDs (PB0..PB7) as outputs
+GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+GPIO_InitStruct.Pull = GPIO_NOPULL;
+GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 
-	for (uint8_t i = 0; i < 8; i++) {
-	GPIO_InitStruct.Pin = led_pins[i];
-	HAL_GPIO_Init(led_ports[i], &GPIO_InitStruct);
-	}
+for (uint8_t i = 0; i < 8; i++) {
+GPIO_InitStruct.Pin = led_pins[i];
+HAL_GPIO_Init(led_ports[i], &GPIO_InitStruct);
+}
 
-	// Configure PA0 as input with pull-up (button active low)
-	GPIO_InitStruct.Pin = GPIO_PIN_0;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+// Configure PA0 as input with pull-up (button active low)
+GPIO_InitStruct.Pin = GPIO_PIN_0;
+GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+GPIO_InitStruct.Pull = GPIO_PULLUP;
+HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 }
 
 /*
@@ -228,8 +233,8 @@ static void MX_GPIO_Init(void)
 */
 void TIM16_IRQHandler(void)
 {
-	HAL_TIM_IRQHandler(&htim16);
-	timer_event = 1;
+HAL_TIM_IRQHandler(&htim16);
+timer_event = 1;
 }
 
 /*
@@ -241,3 +246,4 @@ void Error_Handler(void)
 __disable_irq();
 while (1) {}
 }
+

@@ -1,17 +1,9 @@
 #include "main.h"
-#include <math.h>
-#include "stm32f0xx.h"
-#include <stdint.h>
 
 /* ---------- Function prototypes ---------- */
 static void GPIO_Init(void);
 static void ADC_Init(void);
 static void write_led_byte(uint8_t pattern);
-
-GPIO_TypeDef* led_ports[8] = {GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB, GPIOB};
-uint16_t led_pins[8] = {GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3, GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7};
-
-ADC_HandleTypeDef hadc;
 
 int main(void)
 {
@@ -20,6 +12,9 @@ int main(void)
     ADC_Init();
 
     /* TODO: Start continuous conversion using ADC1 control register */
+    //ADC_CR_ADSTART is a macro for (1 << 2)
+    // commands our board to start sampling
+    ADC1->CR |= ADC_CR_ADSTART;
 
     while (1)
     {
@@ -31,104 +26,76 @@ int main(void)
 static void GPIO_Init(void)
 {
     /* TODO: Enable clocks for GPIOA and GPIOB */
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOB_CLK_ENABLE();
+	// GPIO A and B  are part of the Advanced High performance bus, and we are using its ENable Register
+	RCC->AHBENR |= RCC_AHBENR_GPIOAEN | RCC_AHBENR_GPIOBEN;
 
-    /* TODO: Configure PA5 as Analog mode (11) for ADC_IN5 */
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-
-    // input PA5
-    GPIO_InitStruct.Pin = GPIO_PIN_5;
-    GPIO_InitStruct.Mode = MODE_ANALOG;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
+    /* TODO: Configure PA5 as Analogue mode (11) for ADC_IN5 */
+	// Mode "11" is decimal 3, so we shift 10 places
+	// We use 5*2 to make it clear that pin 5 is the target
+	GPIOA->MODER |= (3U << (5*2));
 
     /* TODO: Configure PB0-PB7 as General purpose outputs (01) and clear ODR initially */
-    // LEDs PB0..PB7 as outputs
-    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	// No HAL function so instead of a for loop we use hex values to handle the state of every LED
+	GPIOB->MODER &= ~ (0xFFFFU); // clear the LEDs and the reset state
+	GPIOB->MODER |= 0x5555U; //output all on 01 01 01 01 01 01 01 01 is 0x5555 in hex
 
-    for (uint8_t i = 0; i < 8; i++) {
-        GPIO_InitStruct.Pin = led_pins[i];
-        HAL_GPIO_Init(led_ports[i], &GPIO_InitStruct);
-    }
-
-
-
+	GPIOB->ODR &= ~(0xFFU);
 }
 
 /* ---------- ADC Configuration ---------- */
 static void ADC_Init(void)
 {
-    ADC_ChannelConfTypeDef sConfig = {0};
+    /* TODO: Enable APB2 clock for ADC1 */
+	RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
 
-    /* Enable APB2 clock for ADC1 */
-    __HAL_RCC_ADC1_CLK_ENABLE();
+    /* TODO: Ensure ADC is disabled, then run calibration */
+	if (ADC1->CR & ADC_CR_ADEN) {
+		ADC1->CR |= ADC_CR_ADDIS; // AD Disable before calibrating
+		while (ADC1->CR & ADC_CR_ADEN);
+	}
+	//calibration flag is set, the while loop is to wait for hardware to clear automatically
+	ADC1->CR |= ADC_CR_ADCAL;
+	while (ADC1->CR & ADC_CR_ADCAL);
 
-    /* Configure the handle BEFORE anything else touches it */
-    hadc.Instance = ADC1;
-    hadc.Init.ClockPrescaler        = ADC_CLOCK_ASYNC_DIV1;
-    hadc.Init.Resolution            = ADC_RESOLUTION_12B;
-    hadc.Init.DataAlign             = ADC_DATAALIGN_RIGHT;
-    hadc.Init.ScanConvMode          = ADC_SCAN_DIRECTION_FORWARD;
-    hadc.Init.EOCSelection          = ADC_EOC_SINGLE_CONV;
-    hadc.Init.LowPowerAutoWait      = DISABLE;
-    hadc.Init.LowPowerAutoPowerOff  = DISABLE;
-    hadc.Init.ContinuousConvMode    = ENABLE;
-    hadc.Init.DiscontinuousConvMode = DISABLE;
-    hadc.Init.ExternalTrigConv      = ADC_SOFTWARE_START;
-    hadc.Init.ExternalTrigConvEdge  = ADC_EXTERNALTRIGCONVEDGE_NONE;
-    hadc.Init.DMAContinuousRequests = DISABLE;
-    hadc.Init.Overrun               = ADC_OVR_DATA_PRESERVED;
-    if (HAL_ADC_Init(&hadc) != HAL_OK)
-    {
-        Error_Handler();
-    }
+    /* TODO: Select channel 5 (PA5) and configure sampling time */
+	// We set bit 5 to channel selection register
+	ADC1->CHSELR |= ADC_CHSELR_CHSEL5;
 
-    /* ADC is guaranteed disabled after HAL_ADC_Init() - safe to calibrate now */
-    if (HAL_ADCEx_Calibration_Start(&hadc) != HAL_OK)
-    {
-        Error_Handler();
-    }
+    /* TODO: Configure 12-bit resolution, right alignment, and continuous conversion mode */
+	ADC1->CFGR1 |= ADC_CFGR1_CONT;
 
-    /* Select channel 5 (PA5) and configure sampling time */
-    sConfig.Channel      = ADC_CHANNEL_5;
-    sConfig.Rank         = ADC_RANK_CHANNEL_NUMBER;
-    sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-    if (HAL_ADC_ConfigChannel(&hadc, &sConfig) != HAL_OK)
-    {
-        Error_Handler();
-    }
+    /* TODO: Enable end-of-conversion interrupt and configure NVIC priorities */
+	/*
+	 * Enable the hardware to generate a signal on the NVIC line when a conversion finishes,
+	 * allowing us to ditch polling and use the ADC1_COMP_IRQHandler.
+	 */
+	ADC1->IER |= ADC_IER_EOCIE;
+	NVIC_SetPriority(ADC1_COMP_IRQn, 0);
+	NVIC_EnableIRQ(ADC1_COMP_IRQn);
 
-    /* Enable end-of-conversion interrupt and configure NVIC priority */
-    HAL_NVIC_SetPriority(ADC1_COMP_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(ADC1_COMP_IRQn);
-
-    /* Enable the ADC in interrupt mode and wait for ADRDY */
-    if (HAL_ADC_Start_IT(&hadc) != HAL_OK)
-    {
-        Error_Handler();
-    }
-    while (!(ADC1->ISR & ADC_ISR_ADRDY)) { }
-    __HAL_ADC_CLEAR_FLAG(&hadc, ADC_FLAG_RDY);
+    /* TODO: Enable the ADC and wait for the ADRDY flag */
+	ADC1->CR |= ADC_CR_ADEN;
+	while (!(ADC1->ISR & ADC_ISR_ADRDY)); // while its not doing the service routine
 }
 
 /* ---------- Interrupt Service Routine ---------- */
 void ADC1_COMP_IRQHandler(void)
 {
+	//this checks if the End of Conversion (EOC) flag is what caused this interrupt
     if (ADC1->ISR & ADC_ISR_EOC)
     {
         /* TODO: Read the raw 12-bit ADC value from the data register (DR) */
         uint32_t adc_val = ADC1->DR; // Replace with register read
 
         /* TODO: Scale the raw value proportionally to a number of LEDs (0 - 8) */
-        uint8_t leds_to_light = (adc_val + 1)>>9; // Replace with your scaling calculation
+        uint8_t leds_to_light = (adc_val *9) / 4096; // Replace with your scaling calculation
 
         /* TODO: Build the bar-graph bit pattern using bitwise shifting */
-        uint8_t output_pattern = pow(2,leds_to_light) - 1; // Replace with your bit pattern logic
-
+        // we use the logic that if leds_to_lights = 3, then (1 << 3) yields binary 1000 (decimal 8)
+        // 8 - 1 = 7, which is binary 0111
+        // in that way we generate 3 ones
+      //  uint8_t output_pattern = (1U << leds_to_light) - 1; // Replace with your bit pattern logic
+        uint8_t output_pattern = ((1U << leds_to_light)-1) << (8 - leds_to_light); //reverse bit logic from left to right
         /* TODO: Drive PB0-PB7 using the helper function */
         write_led_byte(output_pattern);
     }
@@ -141,14 +108,4 @@ static void write_led_byte(uint8_t pattern)
     odr &= ~(0xFFU);
     odr |= pattern;
     GPIOB->ODR = odr;
-}
-
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  __disable_irq();
-  while (1)
-  {
-  }
-  /* USER CODE END Error_Handler_Debug */
 }
